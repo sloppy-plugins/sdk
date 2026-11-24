@@ -283,7 +283,8 @@ def prepare_step(directory, index):
     if not requirements.is_file():
         raise ValueError("The declared requirements file is missing")
     progress("Creating the plugin's private Python environment…")
-    venv.EnvBuilder(with_pip=True).create(environment)
+    # Match the CLI defaults so portable POSIX Python can locate its runtime.
+    venv.EnvBuilder(with_pip=True, symlinks=os.name != "nt").create(environment)
     python = environment / (
         "Scripts/python.exe" if sys.platform == "win32" else "bin/python"
     )
@@ -297,9 +298,12 @@ def prepare_step(directory, index):
     env = dict(os.environ)
     for key in ("PIP_TARGET", "PIP_PREFIX", "PIP_USER"):
         env.pop(key, None)
+    # A fresh environment may contain pip with deprecated vendored dependencies.
     subprocess.run(
         [
             str(python),
+            "-W",
+            "default",
             "-m",
             "pip",
             "install",

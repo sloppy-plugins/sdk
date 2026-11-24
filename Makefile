@@ -25,6 +25,7 @@ help: ## List repository targets
 deps: ## Install locked Node tools and a private Python development environment
 	npm ci --registry="$(NPM_REGISTRY)"
 	$(PYTHON) -m venv "$(CURDIR)/.venv"
+	"$(PY)" -W default -m pip install --index-url "$(PYPI_INDEX)" --upgrade pip
 	"$(PY)" -m pip install --index-url "$(PYPI_INDEX)" -e "./python[dev]"
 
 lock: ## Refresh the Node dependency lockfile after manifest changes

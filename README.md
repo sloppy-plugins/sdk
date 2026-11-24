@@ -45,6 +45,8 @@ make pack
 ```
 
 `make deps` uses the committed npm lockfile and creates `.venv` for Python tools.
+It upgrades the bundled pip before installing SDK dependencies. Bootstrap pip
+warnings use their normal handling; SDK installation and checks retain strict warnings.
 `make build`, `make lint`, `make format`, `make format-check`, and `make test`
 cover both SDKs. Focused targets are `build-typescript`, `build-python`,
 `test-typescript`, and `test-python`. Filter Python tests with
