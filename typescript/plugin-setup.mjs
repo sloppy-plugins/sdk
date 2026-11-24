@@ -316,7 +316,10 @@ export async function prepareStep(directory, index = 0) {
   await run(npm, [...args, '--no-audit', '--no-fund'], cwd);
   console.log(JSON.stringify({ type: 'progress', message: 'Node.js dependencies are ready.' }));
 }
-if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (
+  process.argv[1] &&
+  realpathSync.native(process.argv[1]) === realpathSync.native(fileURLToPath(import.meta.url))
+) {
   try {
     const [operation, directory, option, index] = process.argv.slice(2);
     if (!directory || !['validate', 'prepare', 'set-icon'].includes(operation))

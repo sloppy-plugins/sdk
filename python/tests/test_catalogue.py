@@ -8,7 +8,9 @@ import unittest
 from contextlib import redirect_stdout
 from copy import deepcopy
 from pathlib import Path
+from unittest.mock import patch
 
+from sloppy_sdk import catalogue as catalogue_module
 from sloppy_sdk.catalogue import add_release, read, remove_release, validate, write
 from sloppy_sdk.plugin import inspect_manifest, set_icon, validate_icon
 
@@ -215,6 +217,60 @@ class CatalogueTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("Commit the plugin manifest first", result.stderr)
             self.assertEqual(file.read_bytes(), before)
+
+    def test_git_metadata_tolerates_an_equivalent_repository_root_spelling(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            plugin = root / " packages" / "a plugin café"
+            plugin.mkdir(parents=True)
+            descriptor = plugin / "plugin.json"
+            descriptor.write_text(json.dumps(manifest()), encoding="utf-8")
+
+            def git(*args):
+                return subprocess.check_output(
+                    ["git", "-C", str(root), *args], text=True, stderr=subprocess.PIPE
+                ).strip()
+
+            git("init")
+            git("remote", "add", "origin", "https://example.com/plugins/example.git")
+            git("add", " packages")
+            git(
+                "-c",
+                "user.name=Fixture",
+                "-c",
+                "user.email=fixture@example.invalid",
+                "commit",
+                "-m",
+                "Fixture",
+            )
+            file = root / "catalogue.json"
+            write(file, empty())
+            original = catalogue_module.git
+
+            def reported_alias(directory, *args):
+                if args == ("rev-parse", "--show-toplevel"):
+                    return str(root / " packages" / "..")
+                return original(directory, *args)
+
+            with (
+                patch.object(catalogue_module, "git", side_effect=reported_alias),
+                patch.object(
+                    sys,
+                    "argv",
+                    [
+                        "sloppy-catalogue",
+                        "add-plugin",
+                        str(file),
+                        "--manifest",
+                        str(descriptor),
+                    ],
+                ),
+            ):
+                self.assertEqual(catalogue_module.main(), 0)
+            release = read(file)["plugins"][0]["versions"][0]
+            self.assertEqual(release["package_directory"], " packages/a plugin café")
+            self.assertEqual(release["commit"], git("rev-parse", "HEAD"))
+            self.assertEqual(release["manifest"], manifest())
 
 
 class SetupTests(unittest.TestCase):

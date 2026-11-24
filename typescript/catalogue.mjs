@@ -10,7 +10,7 @@ import {
   rmSync,
   realpathSync,
 } from 'node:fs';
-import { dirname, resolve, relative } from 'node:path';
+import { basename, dirname, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -175,7 +175,7 @@ function git(directory, ...args) {
   return execFileSync('git', ['-C', directory, ...args], {
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
-  }).trim();
+  }).replace(/\r?\n$/, '');
 }
 export function main(args) {
   const [operation, file, ...rest] = args;
@@ -221,16 +221,17 @@ export function main(args) {
   else {
     if (!options.manifest) throw new Error('--manifest PATH is required');
     const manifest = JSON.parse(readFileSync(options.manifest, 'utf8'));
-    const manifestPath = realpathSync(options.manifest);
+    const manifestPath = realpathSync.native(options.manifest);
     const directory = dirname(manifestPath);
     const repository = options.repository ?? git(directory, 'remote', 'get-url', 'origin');
     const commit = options.commit ?? git(directory, 'rev-parse', 'HEAD');
     let packageDirectory = options['package-directory'];
     if (!options.commit) {
-      const root = git(directory, 'rev-parse', '--show-toplevel');
-      packageDirectory ??= relative(root, directory).replaceAll('\\', '/') || '.';
-      const path = relative(root, manifestPath).replaceAll('\\', '/');
-      const committed = JSON.parse(git(root, 'show', `${commit}:${path}`));
+      // Git resolves Windows short names and working-tree aliases itself.
+      const prefix = git(directory, 'rev-parse', '--show-prefix');
+      packageDirectory ??= prefix.replace(/\/$/, '') || '.';
+      const path = prefix + basename(manifestPath);
+      const committed = JSON.parse(git(directory, 'show', `${commit}:${path}`));
       if (!isDeepStrictEqual(committed, manifest))
         throw new Error('Commit the plugin manifest first, or explicitly provide --commit');
     }
@@ -248,7 +249,10 @@ export function main(args) {
   }
   console.log(`Updated ${file}; no Git commit or push was performed.`);
 }
-if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (
+  process.argv[1] &&
+  realpathSync.native(process.argv[1]) === realpathSync.native(fileURLToPath(import.meta.url))
+) {
   try {
     main(process.argv.slice(2));
   } catch (error) {

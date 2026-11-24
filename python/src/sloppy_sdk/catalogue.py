@@ -192,8 +192,10 @@ def remove_release(catalogue, plugin_id, version):
 
 def git(directory, *arguments):
     return subprocess.check_output(
-        ["git", "-C", str(directory), *arguments], text=True, stderr=subprocess.PIPE
-    ).strip()
+        ["git", "-C", str(directory), *arguments],
+        encoding="utf-8",
+        stderr=subprocess.PIPE,
+    ).rstrip("\r\n")
 
 
 def main():
@@ -249,9 +251,9 @@ def main():
             )
             commit = args.commit or git(directory, "rev-parse", "HEAD")
             if not args.commit:
-                repo = Path(git(directory, "rev-parse", "--show-toplevel"))
-                relative = args.manifest.resolve().relative_to(repo).as_posix()
-                committed = json.loads(git(repo, "show", f"{commit}:{relative}"))
+                prefix = git(directory, "rev-parse", "--show-prefix")
+                relative = prefix + args.manifest.resolve().name
+                committed = json.loads(git(directory, "show", f"{commit}:{relative}"))
                 if manifest != committed:
                     raise ValueError(
                         "Commit the plugin manifest first, or explicitly provide the intended --commit"
@@ -261,7 +263,7 @@ def main():
                 if args.commit:
                     package_directory = "."
                 else:
-                    package_directory = directory.relative_to(repo).as_posix()
+                    package_directory = prefix.rstrip("/") or "."
             write(
                 args.file,
                 add_release(

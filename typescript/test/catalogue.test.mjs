@@ -1,9 +1,18 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  copyFileSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { spawnSync } from 'node:child_process';
+import childProcess, { spawnSync } from 'node:child_process';
+import { syncBuiltinESMExports } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import {
   addRelease,
@@ -15,6 +24,16 @@ import {
 } from '../catalogue.mjs';
 
 import { validateIcon, setIcon } from '../plugin-setup.mjs';
+
+function aliasedCLI(directory, script) {
+  const packaged = join(directory, 'sdk-package');
+  const alias = join(directory, 'sdk-alias');
+  mkdirSync(packaged);
+  for (const name of ['catalogue.mjs', 'plugin-setup.mjs'])
+    copyFileSync(new URL(`../${name}`, import.meta.url), join(packaged, name));
+  symlinkSync(packaged, alias, 'junction');
+  return join(alias, script);
+}
 
 test('embedded icons are bounded PNGs, preserved by author tools and catalogues', () => {
   const png = Buffer.from(
@@ -138,6 +157,7 @@ test('invalid catalogue edits preserve the previous file', () => {
 test('the shipped Node CLI authors catalogues without Python, SDK dependencies or Sloppy', () => {
   const directory = mkdtempSync(join(tmpdir(), 'sloppy-catalogue-cli-'));
   try {
+    const cli = aliasedCLI(directory, 'catalogue.mjs');
     const file = join(directory, 'catalogue.json');
     const plugin = join(directory, 'plugin.json');
     writeFileSync(plugin, JSON.stringify(manifest()));
@@ -156,8 +176,8 @@ test('the shipped Node CLI authors catalogues without Python, SDK dependencies o
       ['validate', file],
       ['remove-version', file, 'example', '1.0.0'],
     ]) {
-      const result = spawnSync(process.execPath, ['catalogue.mjs', ...args], {
-        cwd: new URL('../', import.meta.url),
+      const result = spawnSync(process.execPath, ['--preserve-symlinks-main', cli, ...args], {
+        cwd: directory,
         encoding: 'utf8',
       });
       assert.equal(result.status, 0, result.stderr);
@@ -171,6 +191,7 @@ test('the shipped Node CLI authors catalogues without Python, SDK dependencies o
 test('Node setup installs a private empty dependency set and emits progress', () => {
   const directory = mkdtempSync(join(tmpdir(), 'sloppy-npm-setup-'));
   try {
+    const cli = aliasedCLI(directory, 'plugin-setup.mjs');
     const value = manifest();
     value.dependencies = [{ runtime: 'node', minimum_version: '22' }];
     value.initialization = [{ kind: 'npm_install', directory: '.' }];
@@ -181,7 +202,7 @@ test('Node setup installs a private empty dependency set and emits progress', ()
     );
     const result = spawnSync(
       process.execPath,
-      ['plugin-setup.mjs', 'prepare', directory, '--step', '0'],
+      ['--preserve-symlinks-main', cli, 'prepare', directory, '--step', '0'],
       {
         cwd: new URL('../', import.meta.url),
         encoding: 'utf8',
@@ -350,5 +371,55 @@ test('Git metadata defaults infer nested packages and refuse uncommitted release
     assert.throws(() => main(['validate', file, '--typo', 'x']), /Unknown option/);
   } finally {
     rmSync(directory, { recursive: true });
+  }
+});
+
+test('Git metadata tolerates a repository root reported through another filesystem alias', (t) => {
+  const temporary = mkdtempSync(join(tmpdir(), 'sloppy-catalogue-alias-'));
+  const directory = join(temporary, 'repository');
+  const alias = join(temporary, 'repository-alias');
+  const plugin = join(directory, ' packages', 'a plugin café');
+  mkdirSync(plugin, { recursive: true });
+  symlinkSync(directory, alias, 'junction');
+  const descriptor = join(plugin, 'plugin.json');
+  const file = join(directory, 'catalogue.json');
+  const git = (...args) => {
+    const result = spawnSync('git', ['-C', directory, ...args], { encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stderr);
+    return result.stdout.trim();
+  };
+  let stub;
+  try {
+    writeFileSync(descriptor, JSON.stringify(manifest()));
+    git('init');
+    git('remote', 'add', 'origin', 'https://example.com/plugins/example.git');
+    git('add', ' packages');
+    git(
+      '-c',
+      'user.name=Fixture',
+      '-c',
+      'user.email=fixture@example.invalid',
+      'commit',
+      '-m',
+      'Fixture',
+    );
+    writeCatalogue(file, empty());
+    const original = childProcess.execFileSync;
+    // Model Windows Git returning a long path while Node retains its 8.3 alias.
+    stub = t.mock.method(childProcess, 'execFileSync', (program, args, options) =>
+      program === 'git' && args.includes('--show-toplevel')
+        ? alias
+        : original(program, args, options),
+    );
+    syncBuiltinESMExports();
+    main(['add-plugin', file, '--manifest', descriptor]);
+    const release = readCatalogue(file).plugins[0].versions[0];
+    assert.equal(release.package_directory, ' packages/a plugin café');
+    assert.equal(release.commit, git('rev-parse', 'HEAD'));
+    assert.deepEqual(release.manifest, manifest());
+  } finally {
+    stub?.mock.restore();
+    syncBuiltinESMExports();
+    rmSync(temporary, { recursive: true, force: true });
   }
 });
