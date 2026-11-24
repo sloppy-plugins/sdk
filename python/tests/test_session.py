@@ -45,17 +45,8 @@ class Server:
         # Each fixture connection performs a fresh handshake. Avoid TLS session
         # tickets racing concurrent SSLSocket reads/writes in the sync server.
         context.num_tickets = 0
-        cert_file, key_file = (
-            Path(self.directory.name) / "certificate.pem",
-            Path(self.directory.name) / "key.pem",
-        )
-        cert_file.write_text(identity["certificate_pem"])
-        key_file.write_text(identity["private_key_pem"])
-        key_file.chmod(0o600)
-        context.load_cert_chain(cert_file, key_file)
-        key_file.unlink()
-        cert_file.unlink()
         self.context = context
+        self._load_certificate(identity)
         self.approval = threading.Event()
         self.server = serve(
             self.handle, "127.0.0.1", 0, ssl=context, ping_interval=None
@@ -70,6 +61,22 @@ class Server:
         self.file.write_text(json.dumps(self.connection), encoding="utf-8")
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
+
+    def _load_certificate(self, identity):
+        cert_file, key_file = (
+            Path(self.directory.name) / "certificate.pem",
+            Path(self.directory.name) / "key.pem",
+        )
+        try:
+            # Close both files before OpenSSL opens them; Windows locks open
+            # NamedTemporaryFile handles against this second read.
+            cert_file.write_text(identity["certificate_pem"], encoding="utf-8")
+            key_file.write_text(identity["private_key_pem"], encoding="utf-8")
+            key_file.chmod(0o600)
+            self.context.load_cert_chain(cert_file, key_file)
+        finally:
+            key_file.unlink(missing_ok=True)
+            cert_file.unlink(missing_ok=True)
 
     def send(self, socket, body):
         socket.send(json.dumps(body))
@@ -242,16 +249,7 @@ class Server:
 
     def rotate_certificate(self):
         self.identity.regenerate()
-        identity = self.identity._load()
-        with (
-            tempfile.NamedTemporaryFile() as certificate,
-            tempfile.NamedTemporaryFile() as key,
-        ):
-            certificate.write(identity["certificate_pem"].encode())
-            key.write(identity["private_key_pem"].encode())
-            certificate.flush()
-            key.flush()
-            self.context.load_cert_chain(certificate.name, key.name)
+        self._load_certificate(self.identity._load())
 
     def close(self):
         self.server.shutdown()
