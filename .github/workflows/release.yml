@@ -1,0 +1,100 @@
+name: Release
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.event.release.tag_name }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Check and build release packages
+    if: github.event.release.prerelease == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '24.22.1'
+          package-manager-cache: false
+      - uses: actions/setup-python@v7.1.0
+        with:
+          python-version: '3.14'
+      - name: Check the release tag and both package versions
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: python scripts/release.py check-tag "$RELEASE_TAG"
+      - name: Install dependencies
+        run: make deps PYTHON=python
+      - name: Check, test, and package both SDKs
+        run: make check pack PYTHON=python
+      - name: Save the checked npm tarball
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: npm-package
+          path: dist/*.tgz
+          if-no-files-found: error
+          retention-days: 7
+      - name: Save the checked Python distributions
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: python-packages
+          path: python/dist/*
+          if-no-files-found: error
+          retention-days: 7
+
+  npm:
+    name: Publish to npm
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: npm
+      url: https://www.npmjs.com/package/@sloppy-plugins/sdk
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v8.0.2
+        with:
+          name: npm-package
+          path: dist
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '24.22.1'
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+      - name: Install npm with trusted publishing support
+        run: npm install --global npm@12.2.3
+      - name: Publish the checked tarball with OIDC and provenance
+        run: python3 scripts/publish-npm.py dist/*.tgz
+
+  pypi:
+    name: Publish to PyPI
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: pypi
+      url: https://pypi.org/p/sloppy-sdk
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v8.0.2
+        with:
+          name: python-packages
+          path: dist
+      - name: Publish the checked distributions with OIDC
+        uses: pypa/gh-action-pypi-publish@v1.14.3

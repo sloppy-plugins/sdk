@@ -1,0 +1,34 @@
+[build-system]
+requires = ["setuptools>=84.2.1"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sloppy-sdk"
+version = "0.1.0"
+description = "Isolated, resumable Sloppy bubble sessions for Python plugins"
+authors = [{name = "Marat Abdullin", email = "ma@xrlt.net"}]
+requires-python = ">=3.11"
+license = "MIT"
+license-files = ["LICENSE"]
+readme = "README.md"
+dependencies = ["websockets==17.4", "cryptography==50.0.2"]
+
+[project.scripts]
+sloppy-plugin-setup = "sloppy_sdk.plugin:main"
+sloppy-catalogue = "sloppy_sdk.catalogue:main"
+
+[project.optional-dependencies]
+dev = ["build==1.6.1", "twine==7.0.0", "ruff==0.17.6", "setuptools==84.2.1"]
+
+[project.urls]
+Repository = "https://github.com/sloppy-plugins/sdk"
+Issues = "https://github.com/sloppy-plugins/sdk/issues"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I"]
