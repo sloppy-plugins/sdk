@@ -76,13 +76,32 @@ export function validateCatalogue(catalogue) {
       throw new Error('Each plugin needs 1–256 releases');
     const versions = new Set();
     for (const release of plugin.versions) {
-      fields(release, ['version', 'commit', 'package_directory', 'manifest']);
-      if (
-        !semver.test(release.version ?? '') ||
-        versions.has(release.version) ||
-        !/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/i.test(release.commit ?? '')
-      )
+      fields(release, ['version', 'commit', 'package_directory', 'manifest', 'source']);
+      if (!semver.test(release.version ?? '') || versions.has(release.version))
         throw new Error('Releases need unique semantic versions and full Git commit hashes');
+      if (release.source != null) {
+        const source = release.source;
+        const key = source.kind === 'npm' ? 'package' : source.kind === 'pypi' ? 'project' : null;
+        fields(source, ['kind', key, 'url', 'sha256', 'format']);
+        if (
+          !key ||
+          Object.keys(source).length !== 5 ||
+          typeof source[key] !== 'string' ||
+          !(
+            source.kind === 'npm'
+              ? /^(?:@[a-z0-9_.-]+\/)?[a-z0-9][a-z0-9_.-]*$/
+              : /^[A-Za-z0-9][A-Za-z0-9_.-]*$/
+          ).test(source[key]) ||
+          !/^[0-9a-f]{64}$/.test(source.sha256 ?? '') ||
+          !(source.kind === 'npm' ? ['tar.gz'] : ['zip', 'tar.gz']).includes(source.format)
+        )
+          throw new Error('Invalid registry source, SHA-256 digest, or archive format');
+        repositoryURL(source.url);
+        if (release.commit)
+          throw new Error('A release cannot specify both Git and registry sources');
+      } else if (!/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/i.test(release.commit ?? '')) {
+        throw new Error('Git releases need full commit hashes');
+      }
       versions.add(release.version);
       const path = release.package_directory ?? '.';
       if (
@@ -90,6 +109,8 @@ export function validateCatalogue(catalogue) {
         !path ||
         path.startsWith('/') ||
         path.includes('\\') ||
+        path.includes(':') ||
+        [...path].some((char) => char.charCodeAt(0) < 32) ||
         path.split('/').includes('..')
       )
         throw new Error('Package paths must be relative without traversal');

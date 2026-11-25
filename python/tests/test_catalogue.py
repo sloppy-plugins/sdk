@@ -31,6 +31,50 @@ def empty():
 
 
 class CatalogueTests(unittest.TestCase):
+    def test_registry_releases_require_unambiguous_pinned_sources_and_round_trip(self):
+        for kind, key, name, format in (
+            ("npm", "package", "@example/plugin", "tar.gz"),
+            ("pypi", "project", "example-plugin", "zip"),
+        ):
+            with self.subTest(kind=kind):
+                data = add_release(
+                    empty(),
+                    manifest(),
+                    "https://example.com/plugin",
+                    "a" * 40,
+                    new_plugin=True,
+                )
+                release = deepcopy(data["plugins"][0]["versions"][0])
+                release.pop("commit")
+                release["version"] = "2.0.0"
+                release["manifest"]["plugin"]["version"] = "2.0.0"
+                release["source"] = {
+                    "kind": kind,
+                    key: name,
+                    "url": "https://example.com/plugin/archive",
+                    "sha256": "b" * 64,
+                    "format": format,
+                }
+                data["plugins"][0]["versions"].append(release)
+                with tempfile.TemporaryDirectory() as directory:
+                    file = Path(directory) / "catalogue.json"
+                    write(file, data)
+                    self.assertEqual(read(file), data)
+                for patch in (
+                    {"sha256": "short"},
+                    {"url": "http://example.com/archive"},
+                    {"format": "unknown"},
+                    {key: "../escape"},
+                    {"extra": True},
+                ):
+                    invalid = deepcopy(data)
+                    invalid["plugins"][0]["versions"][1]["source"].update(patch)
+                    with self.assertRaises(ValueError):
+                        validate(invalid)
+                release["commit"] = "a" * 40
+                with self.assertRaisesRegex(ValueError, "both Git and registry"):
+                    validate(data)
+
     def test_icons_survive_catalogues_and_invalid_or_remote_images_are_rejected(self):
         png = base64.b64decode(
             "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLttAAAAABJRU5ErkJggg=="

@@ -1,4 +1,4 @@
-"""Maintain Git-backed Sloppy plugin catalogues without publishing them."""
+"""Maintain Sloppy plugin catalogues with Git and registry releases without publishing them."""
 
 import argparse
 import json
@@ -41,10 +41,39 @@ def relative_path(value):
         not isinstance(value, str)
         or not value
         or "\\" in value
+        or ":" in value
+        or any(ord(char) < 32 for char in value)
         or Path(value).is_absolute()
         or ".." in Path(value).parts
     ):
         raise ValueError("Package directory must be relative without parent traversal")
+
+
+def validate_package_source(source):
+    if not isinstance(source, dict):
+        raise ValueError("Package sources must be objects")
+    kind = source.get("kind")
+    key = "package" if kind == "npm" else "project" if kind == "pypi" else None
+    if key is None or set(source) != {"kind", key, "url", "sha256", "format"}:
+        raise ValueError(
+            "Expected an npm or PyPI source with URL, SHA-256, and archive format"
+        )
+    name = source[key]
+    pattern = (
+        r"(?:@[a-z0-9_.-]+/)?[a-z0-9][a-z0-9_.-]*"
+        if kind == "npm"
+        else r"[A-Za-z0-9][A-Za-z0-9_.-]*"
+    )
+    if not isinstance(name, str) or not re.fullmatch(pattern, name):
+        raise ValueError("Invalid registry package name")
+    repository_url(source["url"])
+    if not isinstance(source["sha256"], str) or not re.fullmatch(
+        r"[0-9a-f]{64}", source["sha256"]
+    ):
+        raise ValueError("Package releases require a lowercase SHA-256 digest")
+    if source["format"] not in (("tar.gz",) if kind == "npm" else ("zip", "tar.gz")):
+        raise ValueError("Unsupported package archive format")
+    return source
 
 
 def validate(catalogue):
@@ -78,16 +107,28 @@ def validate(catalogue):
             raise ValueError("Each plugin needs 1–256 releases")
         seen_versions = set()
         for release in versions:
-            if set(release) - {"version", "commit", "package_directory", "manifest"}:
+            if set(release) - {
+                "version",
+                "commit",
+                "package_directory",
+                "manifest",
+                "source",
+            }:
                 raise ValueError("Unknown release fields")
             version = release.get("version", "")
             if not SEMVER.fullmatch(version) or version in seen_versions:
                 raise ValueError("Release versions must be unique semantic versions")
             seen_versions.add(version)
-            if not re.fullmatch(
+            if release.get("source") is not None:
+                validate_package_source(release["source"])
+                if release.get("commit") not in (None, ""):
+                    raise ValueError(
+                        "A release cannot specify both Git and registry sources"
+                    )
+            elif not re.fullmatch(
                 r"(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})", release.get("commit", "")
             ):
-                raise ValueError("Each release needs a full Git commit hash")
+                raise ValueError("Each Git release needs a full Git commit hash")
             relative_path(release.get("package_directory", "."))
             manifest = release.get("manifest", {})
             validate_manifest(manifest)

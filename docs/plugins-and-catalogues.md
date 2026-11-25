@@ -139,7 +139,7 @@ Both SDK sessions use the launcher identity profile by default; reuse it for a
 paired action provider. A plugin must not silently change its manifest during
 initialization. Sloppy checks it again before publishing the installation.
 
-## Git catalogue format
+## Catalogue format
 
 A Git repository is a Sloppy catalogue when its root contains a valid
 `catalogue.json`:
@@ -194,6 +194,28 @@ a failed refresh keeps the last valid snapshot and reports its error.
 Each catalogue has its own source identity. If two catalogues provide the same
 plugin ID, the user can see/select the catalogue and version explicitly. Updating
 an installed catalogue plugin prefers its original source.
+
+Registry releases use a `source` instead of `commit`. The source pins the exact
+archive; `package_directory` selects the directory containing `plugin.json` inside
+it. The top-level repository remains the plugin's source repository for browsing.
+
+```json
+{
+  "kind": "npm",
+  "package": "@example/plugin",
+  "url": "https://registry.npmjs.org/@example/plugin/-/plugin-1.0.0.tgz",
+  "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+  "format": "tar.gz"
+}
+```
+
+For PyPI use `kind: "pypi"`, `project: "example-plugin"`, an HTTPS distribution
+URL, its SHA-256, and `format: "zip"` for universal wheels or `"tar.gz"` for source
+archives. Sloppy copies the selected plugin directory into private storage and
+runs its declared initialization steps, including virtualenv creation. It does not
+install the distribution into the application's Python or Node environment.
+Git and registry releases may coexist, but a release cannot specify both sources.
+Existing published versions, manifests, URLs and hashes remain immutable.
 
 ## Catalogue authoring CLI
 

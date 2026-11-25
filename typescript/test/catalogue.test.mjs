@@ -423,3 +423,44 @@ test('Git metadata tolerates a repository root reported through another filesyst
     rmSync(temporary, { recursive: true, force: true });
   }
 });
+
+test('registry sources round-trip beside Git and reject ambiguous or unpinned archives', () => {
+  for (const [kind, key, name, format] of [
+    ['npm', 'package', '@example/plugin', 'tar.gz'],
+    ['pypi', 'project', 'example-plugin', 'zip'],
+  ]) {
+    const data = addRelease(
+      empty(),
+      manifest(),
+      'https://example.com/plugin',
+      'a'.repeat(40),
+      '.',
+      true,
+    );
+    const release = structuredClone(data.plugins[0].versions[0]);
+    delete release.commit;
+    release.version = release.manifest.plugin.version = '2.0.0';
+    release.source = {
+      kind,
+      [key]: name,
+      url: 'https://example.com/archive',
+      sha256: 'b'.repeat(64),
+      format,
+    };
+    data.plugins[0].versions.push(release);
+    assert.equal(validateCatalogue(data), data);
+    for (const patch of [
+      { sha256: 'short' },
+      { url: 'http://example.com/archive' },
+      { format: 'unknown' },
+      { [key]: '../escape' },
+      { extra: true },
+    ]) {
+      const invalid = structuredClone(data);
+      Object.assign(invalid.plugins[0].versions[1].source, patch);
+      assert.throws(() => validateCatalogue(invalid));
+    }
+    release.commit = 'a'.repeat(40);
+    assert.throws(() => validateCatalogue(data), /both Git and registry/);
+  }
+});
