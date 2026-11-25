@@ -14,6 +14,7 @@ REGISTRY = "https://registry.npmjs.org/"
 
 
 def publish(artifact, run=subprocess.run):
+    artifact = artifact.absolute()
     with tarfile.open(artifact, "r:gz") as archive:
         stream = archive.extractfile("package/package.json")
         if stream is None:

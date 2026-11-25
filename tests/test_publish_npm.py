@@ -7,6 +7,7 @@ import subprocess
 import tarfile
 import tempfile
 import unittest
+from contextlib import chdir
 from pathlib import Path
 from unittest.mock import Mock
 
@@ -83,6 +84,23 @@ class PublishTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "no upload was attempted"):
                     npm.publish(self.artifact, run)
                 self.assertEqual(run.call_count, 1)
+
+    def test_relative_tarball_is_passed_as_an_unambiguous_local_path(self):
+        data = self.artifact.read_bytes()
+        run = Mock(
+            side_effect=[
+                subprocess.CompletedProcess([], 1, '{"error":{"code":"E404"}}', ""),
+                subprocess.CompletedProcess([], 0),
+            ]
+        )
+        with chdir(self.temporary.name):
+            artifact = Path("dist/sdk.tgz")
+            artifact.parent.mkdir()
+            artifact.write_bytes(data)
+            npm.publish(artifact, run)
+            expected = str(artifact.absolute())
+        self.assertEqual(run.call_args.args[0][2], expected)
+        self.assertTrue(Path(run.call_args.args[0][2]).is_absolute())
 
 
 if __name__ == "__main__":
